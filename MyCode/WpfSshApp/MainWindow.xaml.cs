@@ -1,6 +1,9 @@
 ﻿using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Collections.Generic;
+using System.Threading;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Renci.SshNet;
 
@@ -47,6 +50,8 @@ public partial class MainWindow : Window
     private void AppendStatus(string text)
     {
         StatusTextBox.Text = string.IsNullOrEmpty(StatusTextBox.Text) ? text : StatusTextBox.Text + "\n" + text;
+        // Scroll to end
+        StatusTextBox.ScrollToEnd();
     }
 
     private void ConnectButton_Click(object sender, RoutedEventArgs e)
@@ -123,6 +128,66 @@ public partial class MainWindow : Window
         }
     }
 
+    // Streams command output as async enumerable chunks
+    private async IAsyncEnumerable<string> StreamCommandOutputAsync(SshCommand command, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var buffer = new byte[4096];
+        var outputStream = command.OutputStream;
+
+        // Start execution
+        var execTask = command.ExecuteAsync(cancellationToken);
+
+        while (true)
+        {
+            int read;
+            try
+            {
+                read = await outputStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                yield break;
+            }
+
+            if (read > 0)
+            {
+                yield return Encoding.UTF8.GetString(buffer, 0, read);
+            }
+            else
+            {
+                // no data currently available
+                if (execTask.IsCompleted)
+                {
+                    // try one last read to drain any remaining data
+                    read = await outputStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
+                    if (read > 0)
+                    {
+                        yield return Encoding.UTF8.GetString(buffer, 0, read);
+                    }
+
+                    break;
+                }
+
+                // wait briefly before trying again
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // await execution to observe exceptions
+        await execTask.ConfigureAwait(false);
+
+        // include stderr and exit status
+        if (!string.IsNullOrEmpty(command.Error))
+        {
+            yield return "\n[stderr] " + command.Error;
+        }
+
+        if (command.ExitStatus.HasValue)
+        {
+            yield return $"\n[exit code] {command.ExitStatus.Value}";
+        }
+    }
+
     private async void ExecuteButton_Click(object sender, RoutedEventArgs e)
     {
         var cmdText = CommandTextBox.Text ?? string.Empty;
@@ -144,40 +209,19 @@ public partial class MainWindow : Window
             SetStatus("Executing...");
             _logger.LogInformation("Executing command: {Cmd}", cmdText);
 
-            // Run command in background to avoid blocking UI thread
-            var result = await Task.Run(() =>
+            using var command = _sshClient.CreateCommand(cmdText);
+            // Set a timeout to avoid hanging indefinitely (30s)
+            command.CommandTimeout = TimeSpan.FromSeconds(30);
+
+            var cts = new CancellationTokenSource();
+
+            await foreach (var chunk in StreamCommandOutputAsync(command, cts.Token))
             {
-                try
-                {
-                    using var command = _sshClient.CreateCommand(cmdText);
+                // update UI progressively
+                AppendStatus(chunk);
+            }
 
-                    // Set a timeout to avoid hanging indefinitely (30s)
-                    command.CommandTimeout = TimeSpan.FromSeconds(30);
-
-                    // Execute synchronously on background thread
-                    var output = command.Execute();
-
-                    // Include stderr and exit status if present
-                    if (!string.IsNullOrEmpty(command.Error))
-                    {
-                        output = output + "\n[stderr] " + command.Error;
-                    }
-
-                    if (command.ExitStatus.HasValue)
-                    {
-                        output = output + $"\n[exit code] {command.ExitStatus.Value}";
-                    }
-
-                    return output;
-                }
-                catch (Exception ex)
-                {
-                    return "ERROR: " + ex.Message;
-                }
-            });
-
-            AppendStatus(result);
-            _logger.LogInformation("Command result: {Result}", result);
+            _logger.LogInformation("Command completed: {Cmd}", cmdText);
         }
         catch (Exception ex)
         {
@@ -186,6 +230,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            StatusTextBox.ScrollToEnd();
             ExecuteButton.IsEnabled = true;
         }
     }

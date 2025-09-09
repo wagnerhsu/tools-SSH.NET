@@ -41,8 +41,17 @@
 
         <!-- Command row -->
         <TextBlock Grid.Row="5" Grid.Column="0" VerticalAlignment="Center">Command:</TextBlock>
-        <TextBox x:Name="CommandTextBox" Grid.Row="5" Grid.Column="1" Margin="4" />
-        <Button x:Name="ExecuteButton" Grid.Row="5" Grid.Column="2" Content="Execute" Width="80" Margin="4" Click="ExecuteButton_Click" IsEnabled="False" />
+
+        <!-- Use an inner Grid so the TextBox and Button fill the available space in this row -->
+        <Grid Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox x:Name="CommandTextBox" Grid.Column="0" Margin="0" VerticalAlignment="Center" HorizontalAlignment="Stretch" MinHeight="24" />
+            <Button x:Name="ExecuteButton" Grid.Column="1" Content="Execute" Width="100" Margin="8,0,0,0" Click="ExecuteButton_Click" IsEnabled="False" VerticalAlignment="Stretch" />
+        </Grid>
 
         <TextBox x:Name="StatusTextBox" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" Margin="4" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" IsReadOnly="True" />
     </Grid>
