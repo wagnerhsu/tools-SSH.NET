@@ -37,6 +37,9 @@ public partial class App : Application
 		await _host.StartAsync();
 
 		var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+		// Ensure closing the main window shuts down the application so OnExit runs
+		this.MainWindow = mainWindow;
+		this.ShutdownMode = ShutdownMode.OnMainWindowClose;
 		mainWindow.Show();
 	}
 
