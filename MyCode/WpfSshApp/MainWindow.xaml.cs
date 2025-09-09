@@ -150,8 +150,25 @@ public partial class MainWindow : Window
                 try
                 {
                     using var command = _sshClient.CreateCommand(cmdText);
+
+                    // Set a timeout to avoid hanging indefinitely (30s)
+                    command.CommandTimeout = TimeSpan.FromSeconds(30);
+
                     // Execute synchronously on background thread
-                    return command.Execute();
+                    var output = command.Execute();
+
+                    // Include stderr and exit status if present
+                    if (!string.IsNullOrEmpty(command.Error))
+                    {
+                        output = output + "\n[stderr] " + command.Error;
+                    }
+
+                    if (command.ExitStatus.HasValue)
+                    {
+                        output = output + $"\n[exit code] {command.ExitStatus.Value}";
+                    }
+
+                    return output;
                 }
                 catch (Exception ex)
                 {
